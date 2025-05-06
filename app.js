@@ -8,7 +8,6 @@ const PORT = process.env.PORT || 3030;
 
 app.use(bodyParser.json());
 
-// Setup MySQL connection
 const dbConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -17,7 +16,6 @@ const dbConfig = {
 };
 
 const dbName = process.env.DB_NAME;
-
 const connection = mysql.createConnection(dbConfig);
 
 connection.connect(err => {
@@ -28,75 +26,71 @@ connection.connect(err => {
 
   console.log('Connected to MySQL.');
 
-  // Create DB if not exists
   connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``, (err) => {
-    if (err) {
-      console.error('Error creating database:', err);
-      return;
-    }
+    if (err) return console.error('Error creating database:', err);
 
-    // Switch to the DB
     connection.changeUser({ database: dbName }, (err) => {
-      if (err) {
-        console.error('Error changing database:', err);
-        return;
-      }
+      if (err) return console.error('Error selecting database:', err);
 
       console.log(`Using database: ${dbName}`);
 
-      // Create 'requests' table
-      const requestTable = `
+      const createRequests = `
         CREATE TABLE IF NOT EXISTS requests (
           id INT AUTO_INCREMENT PRIMARY KEY,
           method VARCHAR(10),
           path TEXT,
+          url TEXT,
           body TEXT,
-          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          INDEX (createdAt),
+          INDEX (method(5))
         )
       `;
 
-      // Create 'app_log' table
-      const logTable = `
+      const createAppLog = `
         CREATE TABLE IF NOT EXISTS app_log (
           id INT AUTO_INCREMENT PRIMARY KEY,
           message TEXT,
-          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          INDEX (createdAt)
         )
       `;
 
-      connection.query(requestTable);
-      connection.query(logTable);
+      connection.query(createRequests);
+      connection.query(createAppLog);
 
-      // Start the server after DB setup
       app.listen(PORT, () => {
-        console.log(`Server listening on port ${PORT}`);
+        console.log(`Server running on port ${PORT}`);
       });
     });
   });
 });
 
-// Middleware to log all requests
+// Middleware to capture and log request
 app.use((req, res, next) => {
-  const { method, path, body } = req;
-  const insertQuery = 'INSERT INTO requests (method, path, body) VALUES (?, ?, ?)';
-  connection.query(insertQuery, [method, path, JSON.stringify(body)], err => {
+  const { method, path, originalUrl, body } = req;
+  const logQuery = 'INSERT INTO requests (method, path, url, body) VALUES (?, ?, ?, ?)';
+
+  connection.query(logQuery, [method, path, originalUrl, JSON.stringify(body)], err => {
     if (err) {
       const errorLog = 'INSERT INTO app_log (message) VALUES (?)';
       connection.query(errorLog, [err.message || 'Unknown error']);
-      console.error('Error saving request:', err);
+      console.error('Failed to log request:', err);
     } else {
-      console.log(`[${method}] ${path} - ${JSON.stringify(body)}`);
+      console.log(`[${method}] ${originalUrl} - ${JSON.stringify(body)}`);
     }
   });
+
   next();
 });
 
-// Catch-all route
+// General handler
 app.all('*', (req, res) => {
   res.json({
     success: true,
     method: req.method,
     path: req.path,
+    url: req.originalUrl,
     body: req.body,
   });
 });
