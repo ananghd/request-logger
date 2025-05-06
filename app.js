@@ -24,17 +24,17 @@ connection.connect(err => {
     return;
   }
 
-  console.log('Connected to MySQL.');
+  console.log('✅ Connected to MySQL');
 
-  connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``, (err) => {
-    if (err) return console.error('Error creating database:', err);
+  connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``, err => {
+    if (err) return console.error('❌ Error creating database:', err);
 
-    connection.changeUser({ database: dbName }, (err) => {
-      if (err) return console.error('Error selecting database:', err);
+    connection.changeUser({ database: dbName }, err => {
+      if (err) return console.error('❌ Error selecting database:', err);
 
-      console.log(`Using database: ${dbName}`);
+      console.log(`📂 Using database: ${dbName}`);
 
-      const createRequests = `
+      const createRequestsTable = `
         CREATE TABLE IF NOT EXISTS requests (
           id INT AUTO_INCREMENT PRIMARY KEY,
           method VARCHAR(10),
@@ -47,7 +47,7 @@ connection.connect(err => {
         )
       `;
 
-      const createAppLog = `
+      const createAppLogTable = `
         CREATE TABLE IF NOT EXISTS app_log (
           id INT AUTO_INCREMENT PRIMARY KEY,
           message TEXT,
@@ -56,11 +56,11 @@ connection.connect(err => {
         )
       `;
 
-      connection.query(createRequests);
-      connection.query(createAppLog);
+      connection.query(createRequestsTable);
+      connection.query(createAppLogTable);
 
       app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
+        console.log(`🚀 Server listening on port ${PORT}`);
       });
     });
   });
@@ -68,16 +68,22 @@ connection.connect(err => {
 
 // Middleware to capture and log request
 app.use((req, res, next) => {
-  const { method, path, originalUrl, body } = req;
-  const logQuery = 'INSERT INTO requests (method, path, url, body) VALUES (?, ?, ?, ?)';
+  const { method, originalUrl, path, body } = req;
 
-  connection.query(logQuery, [method, path, originalUrl, JSON.stringify(body)], err => {
+  // Print HTTP request info to console
+  console.log('📥 HTTP Request Received:');
+  console.log(`- Method : ${method}`);
+  console.log(`- URL    : ${originalUrl}`);
+  console.log(`- Path   : ${path}`);
+  console.log(`- Body   : ${JSON.stringify(body)}`);
+
+  // Insert request data into DB
+  const sql = 'INSERT INTO requests (method, path, url, body) VALUES (?, ?, ?, ?)';
+  connection.query(sql, [method, path, originalUrl, JSON.stringify(body)], err => {
     if (err) {
-      const errorLog = 'INSERT INTO app_log (message) VALUES (?)';
-      connection.query(errorLog, [err.message || 'Unknown error']);
-      console.error('Failed to log request:', err);
-    } else {
-      console.log(`[${method}] ${originalUrl} - ${JSON.stringify(body)}`);
+      const logSql = 'INSERT INTO app_log (message) VALUES (?)';
+      connection.query(logSql, [err.message || 'Unknown error']);
+      console.error('❌ Failed to log request to database:', err);
     }
   });
 
