@@ -1,0 +1,23 @@
+services:
+  request-app:
+    build: .
+    ports:
+      - "3030:3030"
+    environment:
+      - DB_HOST=
+      - DB_USER=root
+      - DB_PASSWORD=your_password_here
+      - DB_NAME=your_database_name_here
+      - PORT=3030
+    depends_on:
+      - db
+
+  request-db:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: your_password_here
+      MYSQL_DATABASE: your_database_name_here
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"

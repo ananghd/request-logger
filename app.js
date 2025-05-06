@@ -1,108 +1,105 @@
+// Load environment variables from .env file
 require('dotenv').config();
+
 const express = require('express');
-const mysql = require('mysql2/promise');
-
+const mysql = require('mysql');
+const bodyParser = require('body-parser');
 const app = express();
-const PORT = 3030;
 
-const {
-  DB_HOST,
-  DB_USER,
-  DB_PASSWORD,
-  DB_NAME,
-  DB_PORT
-} = process.env;
+// Setup body parser for parsing JSON request bodies
+app.use(bodyParser.json());
 
-let pool;
+// MySQL Database Connection
+const pool = mysql.createPool({
+  connectionLimit: 10,
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME
+});
 
-const initDatabase = async () => {
-  const connection = await mysql.createConnection({
-    host: DB_HOST,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    port: DB_PORT
-  });
+// Create database and tables if they don't exist
+const createDatabaseAndTables = async () => {
+  pool.query(
+    `CREATE DATABASE IF NOT EXISTS ${process.env.DB_NAME}`,
+    (err, result) => {
+      if (err) {
+        console.error('Error creating database:', err);
+        return;
+      }
+      console.log('Database created or exists');
+    }
+  );
 
-  // Create database if not exists
-  await connection.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
-  await connection.end();
-
-  // Connect to the new database
-  pool = mysql.createPool({
-    host: DB_HOST,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    database: DB_NAME,
-    port: DB_PORT
-  });
-
-  // Create 'requests' table
-  await pool.query(`
+  pool.query(`
     CREATE TABLE IF NOT EXISTS requests (
       id INT AUTO_INCREMENT PRIMARY KEY,
       method VARCHAR(10),
       url TEXT,
-      headers TEXT,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+      path TEXT,
+      headers JSON,
+      body JSON,
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`, (err, result) => {
+    if (err) {
+      console.error('Error creating requests table:', err);
+      return;
+    }
+    console.log('Requests table created or exists');
+  });
 
-  // Create 'app_log' table
-  await pool.query(`
+  pool.query(`
     CREATE TABLE IF NOT EXISTS app_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      message TEXT,
-      stack TEXT,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+      error TEXT,
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`, (err, result) => {
+    if (err) {
+      console.error('Error creating app_log table:', err);
+      return;
+    }
+    console.log('App log table created or exists');
+  });
 };
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+createDatabaseAndTables();
 
-// All requests
+// Handle all incoming requests
 app.all('*', async (req, res) => {
   try {
-    const { method, url, headers } = req;
-    const headersJSON = JSON.stringify(headers);
+    const { method, url, headers, body, path } = req;
 
+    // Log request to console
+    console.log(`[${new Date().toISOString()}] ${method} ${url}`);
+    console.log('Headers:', headers);
+    console.log('Body:', body);
+
+    // Save to database
     await pool.query(
-      'INSERT INTO requests (method, url, headers) VALUES (?, ?, ?)',
-      [method, url, headersJSON]
+      `INSERT INTO requests (method, url, path, headers, body) VALUES (?, ?, ?, ?, ?)`,
+      [method, url, path, JSON.stringify(headers), JSON.stringify(body)]
     );
 
     res.json({
-      status: 'success',
+      success: true,
       method,
       url,
-      headers
+      path,
+      headers,
+      body
     });
   } catch (err) {
-    console.error('❌ Error caught in route:', err);
-
-    // Save to app_log table
-    try {
-      await pool.query(
-        'INSERT INTO app_log (message, stack) VALUES (?, ?)',
-        [err.message, err.stack]
-      );
-    } catch (logErr) {
-      console.error('❌ Failed to log error to app_log table:', logErr);
-    }
-
-    res.status(500).json({ status: 'error', message: err.message });
+    console.error('❌ Error:', err);
+    await pool.query(
+      `INSERT INTO app_log (error) VALUES (?)`,
+      [err.toString()]
+    );
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
 
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 Server is running on http://localhost:${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('❌ Failed to initialize DB', err);
-    process.exit(1);
-  });
+// Set port and start server
+const port = process.env.PORT || 3030;
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
